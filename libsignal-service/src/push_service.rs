@@ -969,6 +969,7 @@ pub trait PushService: MaybeSend {
         Ok(device.into_bundle(identity)?)
     }
 
+    // TODO: Replace this with a file read
     async fn get_pre_keys(
         &mut self,
         destination: &ServiceAddress,
