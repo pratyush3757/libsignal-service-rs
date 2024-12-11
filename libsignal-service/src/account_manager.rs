@@ -1,8 +1,8 @@
 use base64::prelude::*;
 use phonenumber::PhoneNumber;
-use std::fs;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
+use std::fs;
 
 use aes::cipher::{KeyIvInit, StreamCipher as _};
 use hmac::digest::Output;
@@ -28,7 +28,9 @@ use crate::proto::sync_message::PniChangeNumber;
 use crate::proto::{DeviceName, SyncMessage};
 use crate::provisioning::generate_registration_id;
 use crate::push_service::{
-    AvatarWrite, DeviceActivationRequest, DeviceInfo, PreKeyResponse, PreKeyResponseItem, RecaptchaAttributes, RegistrationMethod, ServiceIdType, VerifyAccountResponse, DEFAULT_DEVICE_ID
+    AvatarWrite, DeviceActivationRequest, DeviceInfo, PreKeyResponse,
+    PreKeyResponseItem, RecaptchaAttributes, RegistrationMethod, ServiceIdType,
+    VerifyAccountResponse, DEFAULT_DEVICE_ID,
 };
 use crate::sender::OutgoingPushMessage;
 use crate::session_store::SessionStoreExt;
@@ -197,15 +199,17 @@ impl<Service: PushService> AccountManager<Service> {
         );
 
         let pre_key: &PreKeyEntity = pre_keys.get(0).unwrap();
-        let cloned_pre_key = PreKeyEntity { 
-            key_id: pre_key.key_id, 
-            public_key: pre_key.public_key.clone()};
+        let cloned_pre_key = PreKeyEntity {
+            key_id: pre_key.key_id,
+            public_key: pre_key.public_key.clone(),
+        };
 
         let kyber_pre_key: &KyberPreKeyEntity = pq_pre_keys.get(0).unwrap();
-        let cloned_kyber_pre_key = KyberPreKeyEntity { 
-            key_id: kyber_pre_key.key_id, 
-            public_key: kyber_pre_key.public_key.clone(), 
-            signature: kyber_pre_key.signature.clone()};
+        let cloned_kyber_pre_key = KyberPreKeyEntity {
+            key_id: kyber_pre_key.key_id,
+            public_key: kyber_pre_key.public_key.clone(),
+            signature: kyber_pre_key.signature.clone(),
+        };
         let device_id = DEFAULT_DEVICE_ID;
         let registration_id = DEFAULT_DEVICE_ID;
 
@@ -222,10 +226,15 @@ impl<Service: PushService> AccountManager<Service> {
             devices: vec![pre_key_response_item],
         };
 
-        let json_output: String = serde_json::to_string(&pre_key_response).map_err(|e| 
-            ServiceError::JsonDecodeError { reason: e.to_string() })?;
-        fs::write("prekeys.json", json_output).map_err(|e|
-            ServiceError::FSWriteError { reason: e.to_string() })?;
+        let json_output: String = serde_json::to_string(&pre_key_response)
+            .map_err(|e| ServiceError::JsonDecodeError {
+                reason: e.to_string(),
+            })?;
+        fs::write("prekeys.json", json_output).map_err(|e| {
+            ServiceError::FSWriteError {
+                reason: e.to_string(),
+            }
+        })?;
         // let pre_key_state = PreKeyState {
         //     pre_keys,
         //     signed_pre_key,

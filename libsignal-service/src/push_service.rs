@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, time::Duration, fs};
+use std::{collections::HashMap, fmt, fs, time::Duration};
 
 use crate::{
     configuration::{Endpoint, ServiceCredentials},
@@ -994,10 +994,18 @@ pub trait PushService: MaybeSend {
         //         HttpAuthOverride::NoOverride,
         //     )
         //     .await?;
-        let pre_key_response_str: String = fs::read_to_string("prekeys.json").map_err(|e| 
-            ServiceError::FSWriteError { reason: e.to_string() })?;
-        let pre_key_response: PreKeyResponse = serde_json::from_str(&pre_key_response_str).map_err(|e|
-            ServiceError::JsonDecodeError { reason: e.to_string() })?;
+        let pre_key_response_str: String = fs::read_to_string("prekeys.json")
+            .map_err(|e| {
+            ServiceError::FSWriteError {
+                reason: e.to_string(),
+            }
+        })?;
+        let pre_key_response: PreKeyResponse =
+            serde_json::from_str(&pre_key_response_str).map_err(|e| {
+                ServiceError::JsonDecodeError {
+                    reason: e.to_string(),
+                }
+            })?;
         let mut pre_keys = vec![];
         let identity = IdentityKey::decode(&pre_key_response.identity_key)?;
         for device in pre_key_response.devices {
