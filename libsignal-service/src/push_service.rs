@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, time::Duration};
+use std::{collections::HashMap, fmt, time::Duration, fs};
 
 use crate::{
     configuration::{Endpoint, ServiceCredentials},
@@ -237,7 +237,7 @@ struct SenderCertificateJson {
     certificate: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreKeyResponse {
     #[serde(with = "serde_base64")]
@@ -345,7 +345,7 @@ impl<'a> RegistrationMethod<'a> {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreKeyResponseItem {
     pub device_id: u32,
@@ -543,8 +543,13 @@ pub enum ServiceError {
     #[error("Error decoding response: {reason}")]
     ResponseError { reason: String },
 
+    #[error("Error writing JSON to file: {reason}")]
+    FSWriteError { reason: String },
+
     #[error("Error decoding JSON response: {reason}")]
     JsonDecodeError { reason: String },
+    #[error("Error encoding JSON response: {reason}")]
+    JsonEncodeError { reason: String },
     #[error("Error decoding protobuf frame: {0}")]
     ProtobufDecodeError(#[from] prost::DecodeError),
     #[error("error encoding or decoding bincode: {0}")]
@@ -969,25 +974,30 @@ pub trait PushService: MaybeSend {
         Ok(device.into_bundle(identity)?)
     }
 
-    // TODO: Replace this with a file read
+    // TODO: Replace this fn with a file read
     async fn get_pre_keys(
         &mut self,
         destination: &ServiceAddress,
         device_id: u32,
     ) -> Result<Vec<PreKeyBundle>, ServiceError> {
-        let path = if device_id == 1 {
-            format!("/v2/keys/{}/*?pq=true", destination.uuid)
-        } else {
-            format!("/v2/keys/{}/{}?pq=true", destination.uuid, device_id)
-        };
-        let pre_key_response: PreKeyResponse = self
-            .get_json(
-                Endpoint::Service,
-                &path,
-                &[],
-                HttpAuthOverride::NoOverride,
-            )
-            .await?;
+        // let path = if device_id == 1 {
+        //     format!("/v2/keys/{}/*?pq=true", destination.uuid)
+        // } else {
+        //     format!("/v2/keys/{}/{}?pq=true", destination.uuid, device_id)
+        // };
+        //57 TODO: Replace this to a read
+        // let pre_key_response: PreKeyResponse = self
+        //     .get_json(
+        //         Endpoint::Service,
+        //         &path,
+        //         &[],
+        //         HttpAuthOverride::NoOverride,
+        //     )
+        //     .await?;
+        let pre_key_response_str: String = fs::read_to_string("prekeys.json").map_err(|e| 
+            ServiceError::FSWriteError { reason: e.to_string() })?;
+        let pre_key_response: PreKeyResponse = serde_json::from_str(&pre_key_response_str).map_err(|e|
+            ServiceError::JsonDecodeError { reason: e.to_string() })?;
         let mut pre_keys = vec![];
         let identity = IdentityKey::decode(&pre_key_response.identity_key)?;
         for device in pre_key_response.devices {

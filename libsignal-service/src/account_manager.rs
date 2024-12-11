@@ -1,5 +1,6 @@
 use base64::prelude::*;
 use phonenumber::PhoneNumber;
+use std::fs;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 
@@ -27,9 +28,7 @@ use crate::proto::sync_message::PniChangeNumber;
 use crate::proto::{DeviceName, SyncMessage};
 use crate::provisioning::generate_registration_id;
 use crate::push_service::{
-    AvatarWrite, DeviceActivationRequest, DeviceInfo, RecaptchaAttributes,
-    RegistrationMethod, ServiceIdType, VerifyAccountResponse,
-    DEFAULT_DEVICE_ID,
+    AvatarWrite, DeviceActivationRequest, DeviceInfo, PreKeyResponse, PreKeyResponseItem, RecaptchaAttributes, RegistrationMethod, ServiceIdType, VerifyAccountResponse, DEFAULT_DEVICE_ID
 };
 use crate::sender::OutgoingPushMessage;
 use crate::session_store::SessionStoreExt;
@@ -98,44 +97,45 @@ impl<Service: PushService> AccountManager<Service> {
         csprng: &mut R,
         use_last_resort_key: bool,
     ) -> Result<(), ServiceError> {
-        let prekey_status = match self
-            .service
-            .get_pre_key_status(service_id_type)
-            .instrument(tracing::span!(
-                tracing::Level::DEBUG,
-                "Fetching pre key status"
-            ))
-            .await
-        {
-            Ok(status) => status,
-            Err(ServiceError::Unauthorized) => {
-                tracing::info!("Got Unauthorized when fetching pre-key status. Assuming first installment.");
-                // Additionally, the second PUT request will fail if this really comes down to an
-                // authorization failure.
-                crate::push_service::PreKeyStatus {
-                    count: 0,
-                    pq_count: 0,
-                }
-            },
-            Err(e) => return Err(e),
-        };
-        tracing::trace!("Remaining pre-keys on server: {:?}", prekey_status);
-
-        // XXX We should honestly compare the pre-key count with the number of pre-keys we have
-        // locally. If we have more than the server, we should upload them.
-        // Currently the trait doesn't allow us to do that, so we just upload the batch size and
-        // pray.
-        if prekey_status.count >= PRE_KEY_MINIMUM
-            && prekey_status.pq_count >= PRE_KEY_MINIMUM
-        {
-            if protocol_store.signed_pre_keys_count().await? > 0
-                && protocol_store.kyber_pre_keys_count(true).await? > 0
-            {
-                tracing::debug!("Available keys sufficient");
-                return Ok(());
-            }
-            tracing::info!("Available keys sufficient; forcing refresh.");
-        }
+        //57 TODO: Store data to a file instead
+        // let prekey_status = match self
+        //     .service
+        //     .get_pre_key_status(service_id_type)
+        //     .instrument(tracing::span!(
+        //         tracing::Level::DEBUG,
+        //         "Fetching pre key status"
+        //     ))
+        //     .await
+        // {
+        //     Ok(status) => status,
+        //     Err(ServiceError::Unauthorized) => {
+        //         tracing::info!("Got Unauthorized when fetching pre-key status. Assuming first installment.");
+        //         // Additionally, the second PUT request will fail if this really comes down to an
+        //         // authorization failure.
+        //         crate::push_service::PreKeyStatus {
+        //             count: 0,
+        //             pq_count: 0,
+        //         }
+        //     },
+        //     Err(e) => return Err(e),
+        // };
+        // tracing::trace!("Remaining pre-keys on server: {:?}", prekey_status);
+        //
+        // // XXX We should honestly compare the pre-key count with the number of pre-keys we have
+        // // locally. If we have more than the server, we should upload them.
+        // // Currently the trait doesn't allow us to do that, so we just upload the batch size and
+        // // pray.
+        // if prekey_status.count >= PRE_KEY_MINIMUM
+        //     && prekey_status.pq_count >= PRE_KEY_MINIMUM
+        // {
+        //     if protocol_store.signed_pre_keys_count().await? > 0
+        //         && protocol_store.kyber_pre_keys_count(true).await? > 0
+        //     {
+        //         tracing::debug!("Available keys sufficient");
+        //         return Ok(());
+        //     }
+        //     tracing::info!("Available keys sufficient; forcing refresh.");
+        // }
 
         let identity_key_pair = protocol_store
             .get_identity_key_pair()
@@ -156,8 +156,11 @@ impl<Service: PushService> AccountManager<Service> {
                 &identity_key_pair,
                 csprng,
                 use_last_resort_key && !has_last_resort_key,
-                PRE_KEY_BATCH_SIZE,
-                PRE_KEY_BATCH_SIZE,
+                // PRE_KEY_BATCH_SIZE,
+                // PRE_KEY_BATCH_SIZE,
+                // Change batch size to 1
+                1,
+                1,
             )
             .await?;
 
@@ -193,21 +196,51 @@ impl<Service: PushService> AccountManager<Service> {
             if pq_last_resort_key.is_some() { 1 } else { 0 }
         );
 
-        let pre_key_state = PreKeyState {
-            pre_keys,
+        let pre_key: &PreKeyEntity = pre_keys.get(0).unwrap();
+        let cloned_pre_key = PreKeyEntity { 
+            key_id: pre_key.key_id, 
+            public_key: pre_key.public_key.clone()};
+
+        let kyber_pre_key: &KyberPreKeyEntity = pq_pre_keys.get(0).unwrap();
+        let cloned_kyber_pre_key = KyberPreKeyEntity { 
+            key_id: kyber_pre_key.key_id, 
+            public_key: kyber_pre_key.public_key.clone(), 
+            signature: kyber_pre_key.signature.clone()};
+        let device_id = DEFAULT_DEVICE_ID;
+        let registration_id = DEFAULT_DEVICE_ID;
+
+        let pre_key_response_item = PreKeyResponseItem {
+            device_id,
+            registration_id,
             signed_pre_key,
-            identity_key,
-            pq_pre_keys,
-            pq_last_resort_key,
+            pre_key: Some(cloned_pre_key),
+            pq_pre_key: Some(cloned_kyber_pre_key),
         };
 
-        self.service
-            .register_pre_keys(service_id_type, pre_key_state)
-            .instrument(tracing::span!(
-                tracing::Level::DEBUG,
-                "Uploading pre keys"
-            ))
-            .await?;
+        let pre_key_response = PreKeyResponse {
+            identity_key: identity_key.serialize().to_vec(),
+            devices: vec![pre_key_response_item],
+        };
+
+        let json_output: String = serde_json::to_string(&pre_key_response).map_err(|e| 
+            ServiceError::JsonDecodeError { reason: e.to_string() })?;
+        fs::write("prekeys.json", json_output).map_err(|e|
+            ServiceError::FSWriteError { reason: e.to_string() })?;
+        // let pre_key_state = PreKeyState {
+        //     pre_keys,
+        //     signed_pre_key,
+        //     identity_key,
+        //     pq_pre_keys,
+        //     pq_last_resort_key,
+        // };
+        //
+        // self.service
+        //     .register_pre_keys(service_id_type, pre_key_state)
+        //     .instrument(tracing::span!(
+        //         tracing::Level::DEBUG,
+        //         "Uploading pre keys"
+        //     ))
+        //     .await?;
 
         Ok(())
     }
